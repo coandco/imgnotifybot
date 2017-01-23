@@ -10,34 +10,32 @@ import os
 import uuid
 import datetime
 import asyncio
+from urllib.parse import urljoin
 import slixmpp
 import pyinotify
 
 class EventHandler(pyinotify.ProcessEvent):
-    def my_init(self, xmppclient, linkto, baseurl, loop=None):
+    def my_init(self, xmppclient, linkto, baseurl, recipient, loop=None):
         self.loop = loop if loop else asyncio.get_event_loop()
         self.xmppclient = xmppclient
         self.linkto = linkto
         self.baseurl = baseurl
+        self.recipient = recipient
 
     def process_IN_MOVED_TO(self, event):
         datestr = datetime.datetime.now().strftime("%Y%m%d_%H.%M.%S")
         uuidstr = uuid.uuid4().hex[:8]
         extstr = os.path.splitext(event.pathname)[1]
         filename = "%s%s%s" % (datestr, uuidstr, extstr)
-        os.symlink(event.pathname, "%s/%s" % (linkto, filename))
-        self.xmppclient.send_message(mto=self.xmppclient.recipient,
-                                     mbody="%s/%s" % (baseurl, filename),
+        os.symlink(event.pathname, os.path.join(self.linkto, filename))
+        self.xmppclient.send_message(mto=self.recipient,
+                                     mbody=urljoin(self.baseurl, filename),
                                      mtype='chat')
 
 
 class SendMsgBot(slixmpp.ClientXMPP):
-    def __init__(self, jid, password, recipient):
+    def __init__(self, jid, password):
         slixmpp.ClientXMPP.__init__(self, jid, password)
-
-        # Currently, "recipient' is only used by the
-        # pyinotify event handler
-        self.recipient = recipient
 
         # The session_start event will be triggered when
         # the bot establishes its connection with the server
@@ -108,7 +106,7 @@ if __name__ == '__main__':
         args.to = input("Send To: ")
 
     # Initialize our XMPP bot and register plugins
-    xmpp = SendMsgBot(args.jid, args.password, args.to)
+    xmpp = SendMsgBot(args.jid, args.password)
     xmpp.register_plugin('xep_0030') # Service Discovery
     xmpp.register_plugin('xep_0199') # XMPP Ping
 
@@ -126,7 +124,8 @@ if __name__ == '__main__':
     wm = pyinotify.WatchManager()
     mask = pyinotify.IN_MOVED_TO  # watched events
     wm.add_watch(args.directory, mask)
-    handler = EventHandler(xmppclient=xmpp, linkto=args.linkto, baseurl=args.baseurl, loop=loop)
+    handler = EventHandler(xmppclient=xmpp, linkto=args.linkto, baseurl=args.baseurl,
+                           recipient=args.to, loop=loop)
     notifier = pyinotify.AsyncioNotifier(wm, loop, default_proc_fun=handler)
 
     # Start turning the event crank
