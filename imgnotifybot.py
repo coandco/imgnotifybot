@@ -4,6 +4,7 @@
 import logging
 from getpass import getpass
 from argparse import ArgumentParser
+from configparser import SafeConfigParser
 import concurrent.futures
 
 import os
@@ -34,6 +35,9 @@ class EventHandler(pyinotify.ProcessEvent):
 
 
 class SendMsgBot(slixmpp.ClientXMPP):
+    """
+    XMPP bot that will hold a connection open while watching for pyinotify events.
+    """
     def __init__(self, jid, password):
         slixmpp.ClientXMPP.__init__(self, jid, password)
 
@@ -70,6 +74,10 @@ if __name__ == '__main__':
     # Setup the command line arguments.
     parser = ArgumentParser(description=SendMsgBot.__doc__)
 
+    # Config file location
+    parser.add_argument('-c', '--conf', help='location of config file',
+                        dest="conf", default='imgnotifybot.conf', metavar='FILE')
+
     # Output verbosity options.
     parser.add_argument("-q", "--quiet", help="set logging to ERROR",
                         action="store_const", dest="loglevel",
@@ -78,35 +86,18 @@ if __name__ == '__main__':
                         action="store_const", dest="loglevel",
                         const=logging.DEBUG, default=logging.INFO)
 
-    # JID and password options.
-    parser.add_argument("-j", "--jid", dest="jid",
-                        help="JID to use")
-    parser.add_argument("-p", "--password", dest="password",
-                        help="password to use")
-    parser.add_argument("-t", "--to", dest="to",
-                        help="JID to notify")
-    parser.add_argument("-w", "--watch", dest="directory",
-                        help="directory to watch", default=".")
-    parser.add_argument("-l", "--linkto", dest="linkto",
-                        help="directory to place symlinks in", default=".")
-    parser.add_argument("-b", "--baseurl", dest="baseurl",
-                        help="URL base to use in messages", default="http://example.com/")
-
     args = parser.parse_args()
 
-    # Setup logging.
+    # Setup logging
     logging.basicConfig(level=args.loglevel,
                         format='%(levelname)-8s %(message)s')
 
-    if args.jid is None:
-        args.jid = input("Username: ")
-    if args.password is None:
-        args.password = getpass("Password: ")
-    if args.to is None:
-        args.to = input("Send To: ")
+    # Load config
+    config = SafeConfigParser()
+    config.read(args.conf)
 
     # Initialize our XMPP bot and register plugins
-    xmpp = SendMsgBot(args.jid, args.password)
+    xmpp = SendMsgBot(config['credentials']['jid'], config['credentials']['password'])
     xmpp.register_plugin('xep_0030') # Service Discovery
     xmpp.register_plugin('xep_0199') # XMPP Ping
 
@@ -120,13 +111,15 @@ if __name__ == '__main__':
     xmpp.connect(address=('talk.google.com', 5222))
     loop.run_until_complete(xmpp.connected_event_one.wait())
 
-    # set up pyinotify stuff
-    wm = pyinotify.WatchManager()
-    mask = pyinotify.IN_MOVED_TO  # watched events
-    wm.add_watch(args.directory, mask)
-    handler = EventHandler(xmppclient=xmpp, linkto=args.linkto, baseurl=args.baseurl,
-                           recipient=args.to, loop=loop)
-    notifier = pyinotify.AsyncioNotifier(wm, loop, default_proc_fun=handler)
+    # For each [watch.*] section in the config, register a pyinotify listener
+    for watcher in [dict(config[x]) for x in config.sections() if x.startswith("watch")]:
+        wm = pyinotify.WatchManager()
+        mask = pyinotify.IN_MOVED_TO  # watched events
+        wm.add_watch(watcher["watchdir"], mask)
+        handler = EventHandler(xmppclient=xmpp, linkto=watcher["linkto"],
+                               baseurl=watcher["baseurl"], recipient=watcher["msgto"],
+                               loop=loop)
+        notifier = pyinotify.AsyncioNotifier(wm, loop, default_proc_fun=handler)
 
     # Start turning the event crank
     loop.run_forever()
