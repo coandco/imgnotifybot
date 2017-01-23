@@ -107,6 +107,8 @@ if __name__ == '__main__':
     callback_one = lambda _: xmpp.connected_event_one.set()
     xmpp.add_event_handler('session_start', callback_one)
 
+    xmpp.add_event_handler('session_end', lambda _: loop.stop())
+
     # Connect to the XMPP server and run until we're ready to send messages.
     xmpp.connect(address=('talk.google.com', 5222))
     loop.run_until_complete(xmpp.connected_event_one.wait())
