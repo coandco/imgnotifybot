@@ -65,9 +65,19 @@ class SendMsgBot(slixmpp.ClientXMPP):
         self.send_presence()
         self.get_roster()
 
+    @asyncio.coroutine
     def echo(self, msg):
         if msg['type'] in ('chat', 'normal'):
-            msg.reply("Thanks for sending\n%(body)s" % msg).send()
+            if msg['body'] == 'forget on':
+                ret = yield from self.plugin['google']['nosave'].enable(jid=msg['from'].bare)
+                msg.reply("%s recording disabled" % msg['from']).send()
+            elif msg['body'] == 'forget off':
+                msg.reply("%s recording enabled" % msg['from']).send()
+                ret = yield from self.plugin['google']['nosave'].disable(jid=msg['from'].bare)
+            elif msg['body'] == 'die':
+                self.disconnect()
+            else:
+                msg.reply("%s sent %s" % (msg["from"], msg["body"])).send()
 
 
 if __name__ == '__main__':
@@ -100,6 +110,7 @@ if __name__ == '__main__':
     xmpp = SendMsgBot(config['credentials']['jid'], config['credentials']['password'])
     xmpp.register_plugin('xep_0030') # Service Discovery
     xmpp.register_plugin('xep_0199') # XMPP Ping
+    xmpp.register_plugin('google')
 
     # Set a "breakpoint" in the event loop when we're ready to run messages
     loop = asyncio.get_event_loop()
