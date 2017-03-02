@@ -38,7 +38,7 @@ class SendMsgBot(slixmpp.ClientXMPP):
     """
     XMPP bot that will hold a connection open while watching for pyinotify events.
     """
-    def __init__(self, jid, password):
+    def __init__(self, jid, password, auto_reconnect=False):
         slixmpp.ClientXMPP.__init__(self, jid, password)
 
         # The session_start event will be triggered when
@@ -48,6 +48,8 @@ class SendMsgBot(slixmpp.ClientXMPP):
         # our roster.
         self.add_event_handler("session_start", self.start)
         self.add_event_handler("message", self.echo)
+        self.add_event_handler("disconnected", self.end)
+        self.end_session_on_disconnect = not auto_reconnect
 
     def start(self, event):
         """
@@ -65,6 +67,14 @@ class SendMsgBot(slixmpp.ClientXMPP):
         self.send_presence()
         self.get_roster()
 
+    def end(self, event):
+        """
+        Process the session_end event.  In this case, reconnect unless
+        we were specifically told to "die".
+        """
+        if not self.end_session_on_disconnect:
+            self.connect(address=('talk.google.com', 5222))
+
     @asyncio.coroutine
     def echo(self, msg):
         if msg['type'] in ('chat', 'normal'):
@@ -75,6 +85,7 @@ class SendMsgBot(slixmpp.ClientXMPP):
                 msg.reply("%s recording enabled" % msg['from']).send()
                 ret = yield from self.plugin['google']['nosave'].disable(jid=msg['from'].bare)
             elif msg['body'] == 'die':
+                self.end_session_on_disconnect = True
                 self.disconnect()
             else:
                 msg.reply("%s sent %s" % (msg["from"], msg["body"])).send()
@@ -107,7 +118,8 @@ if __name__ == '__main__':
     config.read(args.conf)
 
     # Initialize our XMPP bot and register plugins
-    xmpp = SendMsgBot(config['credentials']['jid'], config['credentials']['password'])
+    xmpp = SendMsgBot(config['credentials']['jid'], config['credentials']['password'],
+                      auto_reconnect=True)
     xmpp.register_plugin('xep_0030') # Service Discovery
     xmpp.register_plugin('xep_0199') # XMPP Ping
     xmpp.register_plugin('google')
